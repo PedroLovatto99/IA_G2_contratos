@@ -11,6 +11,11 @@ services:
       - chroma_dados:/app/rag/chromadb
       - modelos_hf:/root/.cache/huggingface
 
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+
 volumes:
   chroma_dados:
   modelos_hf:
