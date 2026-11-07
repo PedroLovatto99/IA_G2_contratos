@@ -51,16 +51,50 @@ As normas são baixadas de um commit específico do repositório, e não da bran
 ## Arquitetura
 
 ### Fluxo da análise
-```mermaid
-flowchart TD
-    A["Upload do contrato"] --> B["Extração do texto (PDF ou DOCX)"]
-    B --> C["Gemini lista os problemas em frases curtas"]
-    C --> D["Embeddings das frases com e5"]
-    D --> E["Busca no ChromaDB"]
-    E --> F["Prompt com artigos identificados por id"]
-    F --> G["Gemini com saída estruturada"]
-    G --> H["Troca dos ids pelo texto real"]
-    H --> I["Interface"]
+```text
+------------------------------------------------
+|              Upload do contrato              |
+------------------------------------------------
+                        |
+                        v
+------------------------------------------------
+|       Extração do texto (PDF ou DOCX)        |
+------------------------------------------------
+                        |
+                        v
+------------------------------------------------
+|  Gemini lista os problemas em frases curtas  |
+------------------------------------------------
+                        |
+                        v
+------------------------------------------------
+|         Embeddings das frases com e5         |
+------------------------------------------------
+                        |
+                        v
+------------------------------------------------
+|              Busca no ChromaDB               |
+------------------------------------------------
+                        |
+                        v
+------------------------------------------------
+|   Prompt com artigos identificados por id    |
+------------------------------------------------
+                        |
+                        v
+------------------------------------------------
+|         Gemini com saída estruturada         |
+------------------------------------------------
+                        |
+                        v
+------------------------------------------------
+|        Troca dos ids pelo texto real         |
+------------------------------------------------
+                        |
+                        v
+------------------------------------------------
+|                  Interface                   |
+------------------------------------------------
 ```
 
 ### Camadas
