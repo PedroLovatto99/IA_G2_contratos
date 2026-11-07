@@ -1,5 +1,4 @@
 import logging
-import textwrap
 import threading
 from datetime import date
 from io import BytesIO
@@ -11,16 +10,16 @@ from langchain_google_genai.chat_models import ChatGoogleGenerativeAIError
 from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
 
-from IA.agente_config import agente
+from IA.agente_config import agente, identificador
 from rag.ingestao_dados import COLECAO, MODELO, PASTA_CHROMA
 
 
 TAMANHO_MAXIMO_TEXTO = 200_000
 MAXIMO_PAGINAS = 100
 MAXIMO_ANALISES_POR_DIA = 50
-TAMANHO_BLOCO = 1000
-NORMAS_POR_BLOCO = 3
+NORMAS_POR_PROBLEMA = 5
 MAXIMO_NORMAS = 30
+ORDEM_GRAVIDADE = {"alta": 0, "media": 1, "baixa": 2}
 
 logger = logging.getLogger(__name__)
 modelo = SentenceTransformer(MODELO)
@@ -75,23 +74,43 @@ def extrair_texto(nome_arquivo, conteudo):
     return texto
 
 
-def buscar_normas(texto):
-    blocos = textwrap.wrap(texto, TAMANHO_BLOCO)
+def buscar_normas(consultas):
     # o e5 exige o prefixo "query: " nas buscas
-    vetores = modelo.encode([f"query: {bloco}" for bloco in blocos], normalize_embeddings=True)
-    resultado = cliente.get_collection(COLECAO).query(query_embeddings=vetores.tolist(), n_results=NORMAS_POR_BLOCO)
+    vetores = modelo.encode([f"query: {consulta}" for consulta in consultas], normalize_embeddings=True)
+    resultado = cliente.get_collection(COLECAO).query(query_embeddings=vetores.tolist(), n_results=NORMAS_POR_PROBLEMA)
 
-    # o mesmo artigo pode voltar para varios blocos; fica a menor distancia
+    # o mesmo artigo pode voltar para varias consultas; fica a melhor posicao
     normas = {}
     for ids, documentos, metadados, distancias in zip(
         resultado["ids"], resultado["documents"], resultado["metadatas"], resultado["distances"]
     ):
-        for id_norma, documento, metadado, distancia in zip(ids, documentos, metadados, distancias):
-            if id_norma not in normas or distancia < normas[id_norma][0]:
-                normas[id_norma] = (distancia, documento, metadado)
+        for posicao, (id_norma, documento, metadado, distancia) in enumerate(zip(ids, documentos, metadados, distancias)):
+            if id_norma not in normas or (posicao, distancia) < normas[id_norma][:2]:
+                normas[id_norma] = (posicao, distancia, documento, metadado)
 
-    selecionadas = sorted(normas.values(), key=lambda norma: norma[0])[:MAXIMO_NORMAS]
-    return "\n\n".join(f"[{m['norma']} - {m['estrutura']}]\n{d}" for _, d, m in selecionadas)
+    # ordena pela posicao antes da distancia: o corte nao pode deixar um problema sem seus melhores artigos
+    selecionadas = sorted(normas.values(), key=lambda norma: norma[:2])[:MAXIMO_NORMAS]
+    trechos = {
+        f"N{indice}": {
+            "norma": metadado["norma"],
+            "artigo": metadado["artigo"],
+            "estrutura": metadado["estrutura"],
+            "texto": documento,
+            "fonte": metadado["fonte"],
+        }
+        for indice, (_, _, documento, metadado) in enumerate(selecionadas, start=1)
+    }
+    prompt = "\n\n".join(f"[{id_trecho}] {t['norma']} - {t['artigo']}\n{t['texto']}" for id_trecho, t in trechos.items())
+    return prompt, trechos
+
+
+def mapear_fundamentos(ids, trechos):
+    # ids fora da busca sao descartados: a citacao sempre vem da base, nunca do modelo
+    return [
+        {campo: trechos[id_trecho][campo] for campo in ("norma", "artigo", "texto", "fonte")}
+        for id_trecho in dict.fromkeys(ids)
+        if id_trecho in trechos
+    ]
 
 
 def registrar_uso():
@@ -109,7 +128,16 @@ def analisar_contrato(nome_arquivo, conteudo):
     registrar_uso()
 
     try:
-        analise = agente.invoke({"normas": buscar_normas(texto), "contrato": texto})
+        identificados = identificador.invoke({"contrato": texto})
+        if identificados is None:
+            raise FalhaNaAnalise("A analise veio em formato invalido. Tente novamente")
+
+        # sem problemas nao ha o que buscar, e a segunda chamada ao Gemini e evitada
+        if not identificados.problemas:
+            return {"pontos_de_atencao": []}
+
+        normas, trechos = buscar_normas([problema.consulta for problema in identificados.problemas])
+        analise = agente.invoke({"normas": normas, "contrato": texto})
     except (ChatGoogleGenerativeAIError, APIError) as erro:
         logger.exception("Falha na chamada ao Gemini")
         raise FalhaNaAnalise("Nao foi possivel analisar o contrato agora. Tente novamente mais tarde") from erro
@@ -117,4 +145,8 @@ def analisar_contrato(nome_arquivo, conteudo):
     if analise is None:
         raise FalhaNaAnalise("A analise veio em formato invalido. Tente novamente")
 
-    return analise
+    pontos = [
+        {**ponto.model_dump(), "fundamentos": mapear_fundamentos(ponto.fundamentos, trechos)}
+        for ponto in analise.pontos_de_atencao
+    ]
+    return {"pontos_de_atencao": sorted(pontos, key=lambda ponto: ORDEM_GRAVIDADE[ponto["gravidade"]])}

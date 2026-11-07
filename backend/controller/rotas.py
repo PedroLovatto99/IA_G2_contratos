@@ -19,7 +19,7 @@ def avaliar_contrato(arquivo: UploadFile):
     if not (arquivo.filename or "").lower().endswith(EXTENSOES_ACEITAS):
         raise HTTPException(status_code=415, detail="Envie um arquivo PDF ou DOCX")
 
-    if arquivo.size > TAMANHO_MAXIMO_ARQUIVO:
+    if (arquivo.size or 0) > TAMANHO_MAXIMO_ARQUIVO:
         raise HTTPException(status_code=413, detail="O arquivo deve ter no maximo 10 MB")
 
     try:

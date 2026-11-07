@@ -1,12 +1,12 @@
 import { useState, type FormEvent } from 'react'
 
-const URL_API = 'http://localhost:8000'
+const URL_API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 type PontoDeAtencao = {
   clausula: string
   problema: string
   gravidade: 'alta' | 'media' | 'baixa'
-  fundamento: string
+  fundamentos: { norma: string; artigo: string }[]
 }
 
 const GRAVIDADES = {
@@ -96,12 +96,20 @@ function App() {
                   </blockquote>
                   <p className="mt-3 text-slate-900">{ponto.problema}</p>
                   <p className="mt-3 text-sm text-slate-600">
-                    <strong>Fundamento:</strong> {ponto.fundamento}
+                    <strong>Fundamento:</strong>{' '}
+                    {[...new Set(ponto.fundamentos.map((f) => `${f.norma} – ${f.artigo}`))].join('; ') ||
+                      'Sem fundamento nas normas consultadas'}
                   </p>
                 </li>
               ))}
             </ul>
           </>
+        )}
+
+        {pontos && (
+          <p className="mt-6 text-sm text-slate-500">
+            Esta análise é um apoio informativo e não substitui a orientação de um advogado.
+          </p>
         )}
       </section>
     </main>
